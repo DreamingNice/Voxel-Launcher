@@ -14,7 +14,7 @@ To use this launcher, you need **Java 17 or below**. Java 8 is currently unsuppo
 
 For now, there is only **one version** of the launcher released, so you can download and install it using the installer.
 
-The launcher currently **only supports Windows for now** cross platform support comeing soon for Linux.
+The launcher currently **only supports Windows**,cross platform support comeing soon for Linux.
 
 ---
 
