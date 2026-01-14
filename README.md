@@ -4,15 +4,15 @@ The **Voxel Launcher** is a JavaScript-based minimal launcher for Minecraft. The
 
 ---
 
-## IMPORTANT
+## JAVA
 
-To use this launcher, you need **Java 17 or below**. Java 8 is currently unsupported for newer Minecraft versions.
+Launcher curently supports all version of java
 
 ---
 
 ## Installation
 
-For now, there is only **one version** of the launcher released, so you can download and install it using the installer.
+You can download from rleases and install it using the installer.
 
 The launcher currently **only supports Windows**,cross platform support comeing soon for Linux.
 
