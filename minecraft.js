@@ -3,6 +3,7 @@ const path = require("path");
 const axios = require("axios");
 const { spawn, execSync } = require("child_process");
 const os = require("os");
+const AdmZip = require("adm-zip");
 
 const MINECRAFT_DIR = path.join(os.homedir(), ".minecraft-launcher");
 const VERSIONS_DIR = path.join(MINECRAFT_DIR, "versions");
@@ -20,11 +21,9 @@ const VERSION_MANIFEST_URL = "https://launchermeta.mojang.com/mc/game/version_ma
 async function getVersions() {
   try {
     const manifestResponse = await axios.get(VERSION_MANIFEST_URL);
-    // Return all versions, sorted with releases first
     const versions = manifestResponse.data.versions
       .filter(v => v.type === "release" || v.type === "snapshot")
       .sort((a, b) => {
-        // Sort by release date, newest first
         return new Date(b.releaseTime) - new Date(a.releaseTime);
       });
     return versions;
@@ -35,15 +34,12 @@ async function getVersions() {
 
 async function getVersionData(versionId) {
   try {
-    // Get version manifest
     const manifestResponse = await axios.get(VERSION_MANIFEST_URL);
     
-    // If no version specified, use latest
     if (!versionId) {
       versionId = manifestResponse.data.latest.release;
     }
     
-    // Find the version info
     const versionInfo = manifestResponse.data.versions.find(
       (v) => v.id === versionId
     );
@@ -52,7 +48,6 @@ async function getVersionData(versionId) {
       throw new Error(`Version ${versionId} not found in manifest`);
     }
     
-    // Get version details
     const versionDetails = await axios.get(versionInfo.url);
     
     return {
@@ -68,13 +63,11 @@ function downloadFile(url, filePath, onProgress) {
   return new Promise(async (resolve, reject) => {
     let writer = null;
     try {
-      // Create directory if it doesn't exist
       const dir = path.dirname(filePath);
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
       }
 
-      // Skip if file already exists
       if (fs.existsSync(filePath)) {
         const stats = fs.statSync(filePath);
         if (stats.size > 0) {
@@ -133,12 +126,10 @@ function downloadFile(url, filePath, onProgress) {
 }
 
 function parseLibraryPath(library) {
-  // Use the path from downloads.artifact if available (more reliable)
   if (library.downloads && library.downloads.artifact && library.downloads.artifact.path) {
     return library.downloads.artifact.path;
   }
   
-  // Fallback to parsing from name
   const parts = library.name.split(":");
   const group = parts[0].replace(/\./g, "/");
   const artifact = parts[1];
@@ -183,6 +174,7 @@ async function downloadLibraries(versionData, onProgress) {
   let completed = 0;
 
   for (const library of libraries) {
+    // Download main library artifact
     if (library.downloads && library.downloads.artifact) {
       const libPath = parseLibraryPath(library);
       const libFilePath = path.join(LIBRARIES_DIR, libPath);
@@ -195,16 +187,43 @@ async function downloadLibraries(versionData, onProgress) {
             onProgress(overallProgress);
           }
         });
-        completed++;
       } catch (error) {
         console.warn(`Failed to download library ${library.name}: ${error.message}`);
-      // Continue with other libraries
-      completed++;
-      if (onProgress) {
-        onProgress((completed / total) * 100);
       }
-      continue;
+    }
+    
+    // Download native classifiers if they exist
+    if (library.downloads && library.downloads.classifiers) {
+      const osName = os.platform();
+      let nativeKey = null;
+      
+      if (library.natives) {
+        if (osName === "win32" && library.natives.windows) {
+          nativeKey = library.natives.windows.replace("${arch}", process.arch === "x64" ? "64" : "32");
+        } else if (osName === "darwin" && library.natives.osx) {
+          nativeKey = library.natives.osx.replace("${arch}", process.arch === "x64" ? "64" : "32");
+        } else if (osName === "linux" && library.natives.linux) {
+          nativeKey = library.natives.linux.replace("${arch}", process.arch === "x64" ? "64" : "32");
+        }
       }
+      
+      if (nativeKey && library.downloads.classifiers[nativeKey]) {
+        const nativeInfo = library.downloads.classifiers[nativeKey];
+        const nativePath = nativeInfo.path;
+        const nativeFilePath = path.join(LIBRARIES_DIR, nativePath);
+        const nativeUrl = nativeInfo.url;
+        
+        try {
+          await downloadFile(nativeUrl, nativeFilePath);
+        } catch (error) {
+          console.warn(`Failed to download native library ${library.name}: ${error.message}`);
+        }
+      }
+    }
+    
+    completed++;
+    if (onProgress) {
+      onProgress((completed / total) * 100);
     }
   }
 }
@@ -213,29 +232,26 @@ async function downloadAssets(versionData, onProgress) {
   if (!versionData.assetIndex) return;
   
   try {
-    // Download asset index
     const assetIndexUrl = versionData.assetIndex.url;
     const assetIndexPath = path.join(ASSETS_DIR, "indexes", `${versionData.assetIndex.id}.json`);
     
-    // Only download if not exists or empty
     if (!fs.existsSync(assetIndexPath) || fs.statSync(assetIndexPath).size === 0) {
       await downloadFile(assetIndexUrl, assetIndexPath);
     }
 
-    // Read asset index
     const assetIndex = JSON.parse(fs.readFileSync(assetIndexPath, "utf8"));
     
-    // Download all required objects
     const objects = assetIndex.objects || {};
     const total = Object.keys(objects).length;
     let completed = 0;
     let failed = 0;
+    const failedAssets = [];
 
     console.log(`Downloading ${total} asset files...`);
 
-    // Download assets in parallel batches for better performance
     const batchSize = 10;
     const objectEntries = Object.entries(objects);
+    const maxRetries = 3;
     
     for (let i = 0; i < objectEntries.length; i += batchSize) {
       const batch = objectEntries.slice(i, i + batchSize);
@@ -245,23 +261,46 @@ async function downloadAssets(versionData, onProgress) {
         const objectPath = path.join(ASSETS_DIR, "objects", hashPrefix, hash);
         const objectUrl = `https://resources.download.minecraft.net/${hashPrefix}/${hash}`;
 
-        try {
-          // Skip if already exists
-          if (fs.existsSync(objectPath)) {
-            const stats = fs.statSync(objectPath);
-            if (stats.size > 0) {
-              completed++;
-              return;
+        // Check if file exists and has correct size
+        if (fs.existsSync(objectPath)) {
+          const stats = fs.statSync(objectPath);
+          if (stats.size === assetData.size) {
+            completed++;
+            return;
+          }
+        }
+        
+        // Try downloading with retries
+        let lastError = null;
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+          try {
+            await downloadFile(objectUrl, objectPath);
+            
+            // Verify file size after download
+            if (fs.existsSync(objectPath)) {
+              const stats = fs.statSync(objectPath);
+              if (stats.size === assetData.size) {
+                completed++;
+                return;
+              } else {
+                // Size mismatch, delete and retry
+                fs.unlinkSync(objectPath);
+                throw new Error(`Size mismatch: expected ${assetData.size}, got ${stats.size}`);
+              }
+            }
+          } catch (error) {
+            lastError = error;
+            if (attempt < maxRetries - 1) {
+              // Wait before retry (exponential backoff)
+              await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
             }
           }
-          
-          await downloadFile(objectUrl, objectPath);
-          completed++;
-        } catch (error) {
-          failed++;
-          console.warn(`Failed to download asset ${hash}: ${error.message}`);
-          // Continue with other assets
         }
+        
+        // All retries failed
+        failed++;
+        failedAssets.push({ hash, path: assetPath, error: lastError?.message });
+        console.warn(`Failed to download asset ${hash} after ${maxRetries} attempts`);
       });
 
       await Promise.all(promises);
@@ -272,97 +311,294 @@ async function downloadAssets(versionData, onProgress) {
         onProgress(90 + assetProgress);
       }
       
-      // Log progress every 100 assets
       if (completed % 100 === 0 || completed === total) {
         console.log(`Assets: ${completed}/${total} downloaded (${failed} failed)`);
       }
     }
     
     console.log(`Asset download complete: ${completed}/${total} (${failed} failed)`);
+    
+    // If too many assets failed, throw an error
+    if (failed > total * 0.1) { // More than 10% failed
+      throw new Error(
+        `Too many asset downloads failed (${failed}/${total}). ` +
+        `Please check your internet connection and try again.`
+      );
+    } else if (failed > 0) {
+      console.warn(`Warning: ${failed} assets failed to download. Game may have missing textures or sounds.`);
+    }
   } catch (error) {
     console.error(`Asset download error: ${error.message}`);
-    throw new Error(`Failed to download assets: ${error.message}`);
+    throw error;
   }
+}
+
+function extractNatives(versionData, nativesDir) {
+  // Clean up old natives
+  if (fs.existsSync(nativesDir)) {
+    fs.rmSync(nativesDir, { recursive: true, force: true });
+  }
+  fs.mkdirSync(nativesDir, { recursive: true });
+  
+  if (!versionData.libraries) return;
+  
+  const osName = os.platform();
+  const libraries = versionData.libraries.filter(shouldUseLibrary);
+  
+  console.log("Extracting native libraries...");
+  
+  for (const library of libraries) {
+    if (!library.downloads || !library.downloads.classifiers || !library.natives) {
+      continue;
+    }
+    
+    let nativeKey = null;
+    if (osName === "win32" && library.natives.windows) {
+      nativeKey = library.natives.windows.replace("${arch}", process.arch === "x64" ? "64" : "32");
+    } else if (osName === "darwin" && library.natives.osx) {
+      nativeKey = library.natives.osx.replace("${arch}", process.arch === "x64" ? "64" : "32");
+    } else if (osName === "linux" && library.natives.linux) {
+      nativeKey = library.natives.linux.replace("${arch}", process.arch === "x64" ? "64" : "32");
+    }
+    
+    if (!nativeKey || !library.downloads.classifiers[nativeKey]) {
+      continue;
+    }
+    
+    const nativeInfo = library.downloads.classifiers[nativeKey];
+    const nativePath = nativeInfo.path;
+    const nativeFilePath = path.join(LIBRARIES_DIR, nativePath);
+    
+    if (!fs.existsSync(nativeFilePath)) {
+      console.warn(`Native library not found: ${nativeFilePath}`);
+      continue;
+    }
+    
+    try {
+      const zip = new AdmZip(nativeFilePath);
+      const zipEntries = zip.getEntries();
+      
+      for (const entry of zipEntries) {
+        // Skip META-INF directory
+        if (entry.entryName.startsWith("META-INF/")) {
+          continue;
+        }
+        
+        // Only extract files (not directories)
+        if (!entry.isDirectory) {
+          const extractPath = path.join(nativesDir, entry.entryName);
+          
+          // Create parent directory if needed
+          const parentDir = path.dirname(extractPath);
+          if (!fs.existsSync(parentDir)) {
+            fs.mkdirSync(parentDir, { recursive: true });
+          }
+          
+          // Extract the file
+          zip.extractEntryTo(entry, parentDir, false, true);
+        }
+      }
+      
+      console.log(`Extracted natives from: ${library.name}`);
+    } catch (error) {
+      console.warn(`Failed to extract natives from ${library.name}: ${error.message}`);
+    }
+  }
+  
+  console.log("Native extraction complete");
 }
 
 function getJavaVersion(javaPath = "java") {
   try {
-    const output = execSync(`"${javaPath}" -version 2>&1`, { encoding: "utf8", timeout: 5000 });
-    // Parse version from output like: "openjdk version "21.0.1" 2023-10-17"
-    const match = output.match(/version\s+"?(\d+)/);
-    if (match) {
-      return parseInt(match[1], 10);
+    const output = execSync(`"${javaPath}" -version 2>&1`, {
+      encoding: "utf8",
+      timeout: 5000
+    });
+
+    // Match full version string
+    const match = output.match(/version\s+"([^"]+)"/);
+    if (!match) return null;
+
+    const versionStr = match[1];
+
+    // Java 8 and below: "1.8.0_xxx"
+    if (versionStr.startsWith("1.")) {
+      return parseInt(versionStr.split(".")[1], 10);
     }
-  } catch (error) {
+
+    // Java 9+
+    return parseInt(versionStr.split(".")[0], 10);
+  } catch {
     return null;
   }
-  return null;
 }
 
-function findJavaExecutable() {
-  const javaPaths = [];
+
+function findAllJavaInstallations() {
+  const javaInstallations = [];
+  const seenPaths = new Set(); // Track unique paths to avoid duplicates
   
-  // Priority 1: Check the specific Java installation path
-  const specificJavaPath = "C:\\Program Files\\Eclipse Adoptium\\jdk-25.0.1.8-hotspot\\bin\\java.exe";
-  if (fs.existsSync(specificJavaPath)) {
-    javaPaths.push(specificJavaPath);
-  }
+  // Helper function to add Java if valid and not duplicate
+  const addJavaIfValid = (javaPath, vendor = "Unknown") => {
+    if (seenPaths.has(javaPath)) return;
+    
+    const version = getJavaVersion(javaPath);
+    if (version !== null) {
+      seenPaths.add(javaPath);
+      javaInstallations.push({ path: javaPath, version, vendor });
+    }
+  };
   
-  // Priority 2: Try JAVA_HOME
+  // Priority 1: Try JAVA_HOME
   if (process.env.JAVA_HOME) {
     const javaHome = process.env.JAVA_HOME;
-    javaPaths.push(path.join(javaHome, "bin", "java"));
-    if (os.platform() === "win32") {
-      javaPaths.push(path.join(javaHome, "bin", "java.exe"));
+    const javaPath = os.platform() === "win32" 
+      ? path.join(javaHome, "bin", "java.exe")
+      : path.join(javaHome, "bin", "java");
+    
+    if (fs.existsSync(javaPath)) {
+      addJavaIfValid(javaPath, "JAVA_HOME");
     }
   }
   
-  // Priority 3: Try common installation paths on Windows (Eclipse Adoptium)
+  // Priority 2: Search common installation directories
   if (os.platform() === "win32") {
     const programFiles = process.env["ProgramFiles"] || "C:\\Program Files";
     const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
     
-    // Check for Adoptium/Temurin - check all versions, newest first
+    // Common Java distribution directories
+    const javaVendors = [
+      { name: "Eclipse Adoptium", vendor: "Adoptium" },
+      { name: "Temurin", vendor: "Adoptium" },
+      { name: "Java", vendor: "Oracle" },
+      { name: "OpenJDK", vendor: "OpenJDK" },
+      { name: "Zulu", vendor: "Azul Zulu" },
+      { name: "Azul", vendor: "Azul Zulu" },
+      { name: "Amazon Corretto", vendor: "Amazon Corretto" },
+      { name: "Corretto", vendor: "Amazon Corretto" },
+      { name: "Microsoft", vendor: "Microsoft" },
+      { name: "BellSoft", vendor: "Liberica" },
+      { name: "Liberica", vendor: "Liberica" },
+      { name: "GraalVM", vendor: "GraalVM" },
+      { name: "SapMachine", vendor: "SAP" },
+      { name: "Semeru", vendor: "IBM Semeru" },
+      { name: "RedHat", vendor: "Red Hat" }
+    ];
+    
     for (const base of [programFiles, programFilesX86]) {
-      try {
-        const adoptiumPath = path.join(base, "Eclipse Adoptium");
-        if (fs.existsSync(adoptiumPath)) {
-          const dirs = fs.readdirSync(adoptiumPath);
-          // Sort directories to try newer versions first
+      for (const { name, vendor } of javaVendors) {
+        try {
+          const vendorPath = path.join(base, name);
+          if (!fs.existsSync(vendorPath)) continue;
+          
+          const dirs = fs.readdirSync(vendorPath);
+          // Sort to try newer versions first
           dirs.sort().reverse();
+          
           for (const dir of dirs) {
-            const javaPath = path.join(adoptiumPath, dir, "bin", "java.exe");
+            const javaPath = path.join(vendorPath, dir, "bin", "java.exe");
             if (fs.existsSync(javaPath)) {
-              javaPaths.push(javaPath);
+              addJavaIfValid(javaPath, vendor);
             }
+          }
+        } catch (e) {
+          // Ignore errors and continue
+        }
+      }
+      
+      // Also check direct Program Files for jdk/jre folders
+      try {
+        const items = fs.readdirSync(base);
+        for (const item of items) {
+          if (item.toLowerCase().includes("jdk") || item.toLowerCase().includes("jre")) {
+            const javaPath = path.join(base, item, "bin", "java.exe");
+            if (fs.existsSync(javaPath)) {
+              addJavaIfValid(javaPath, "Generic");
+            }
+          }
+        }
+      } catch (e) {}
+    }
+  } else if (os.platform() === "darwin") {
+    // macOS common paths
+    const macPaths = [
+      "/Library/Java/JavaVirtualMachines",
+      "/System/Library/Java/JavaVirtualMachines",
+      path.join(os.homedir(), "Library/Java/JavaVirtualMachines")
+    ];
+    
+    for (const basePath of macPaths) {
+      try {
+        if (!fs.existsSync(basePath)) continue;
+        
+        const jvms = fs.readdirSync(basePath);
+        for (const jvm of jvms) {
+          const javaPath = path.join(basePath, jvm, "Contents", "Home", "bin", "java");
+          if (fs.existsSync(javaPath)) {
+            let vendor = "Unknown";
+            if (jvm.toLowerCase().includes("temurin") || jvm.toLowerCase().includes("adoptium")) vendor = "Adoptium";
+            else if (jvm.toLowerCase().includes("zulu")) vendor = "Azul Zulu";
+            else if (jvm.toLowerCase().includes("corretto")) vendor = "Amazon Corretto";
+            else if (jvm.toLowerCase().includes("liberica")) vendor = "Liberica";
+            else if (jvm.toLowerCase().includes("graalvm")) vendor = "GraalVM";
+            else if (jvm.toLowerCase().includes("openjdk")) vendor = "OpenJDK";
+            else if (jvm.toLowerCase().includes("oracle")) vendor = "Oracle";
+            
+            addJavaIfValid(javaPath, vendor);
+          }
+        }
+      } catch (e) {}
+    }
+  } else if (os.platform() === "linux") {
+    // Linux common paths
+    const linuxPaths = [
+      "/usr/lib/jvm",
+      "/usr/java",
+      "/opt/java",
+      "/opt/jdk",
+      path.join(os.homedir(), ".sdkman/candidates/java")
+    ];
+    
+    for (const basePath of linuxPaths) {
+      try {
+        if (!fs.existsSync(basePath)) continue;
+        
+        const jvms = fs.readdirSync(basePath);
+        for (const jvm of jvms) {
+          const javaPath = path.join(basePath, jvm, "bin", "java");
+          if (fs.existsSync(javaPath)) {
+            let vendor = "Unknown";
+            if (jvm.toLowerCase().includes("temurin") || jvm.toLowerCase().includes("adoptium")) vendor = "Adoptium";
+            else if (jvm.toLowerCase().includes("zulu")) vendor = "Azul Zulu";
+            else if (jvm.toLowerCase().includes("corretto")) vendor = "Amazon Corretto";
+            else if (jvm.toLowerCase().includes("liberica")) vendor = "Liberica";
+            else if (jvm.toLowerCase().includes("graalvm")) vendor = "GraalVM";
+            else if (jvm.toLowerCase().includes("openjdk")) vendor = "OpenJDK";
+            else if (jvm.toLowerCase().includes("oracle")) vendor = "Oracle";
+            
+            addJavaIfValid(javaPath, vendor);
           }
         }
       } catch (e) {}
     }
   }
   
-  // Priority 4: Try java in PATH (java, java21, etc.)
-  javaPaths.push("java");
-  for (let version = 25; version >= 8; version--) {
-    javaPaths.push(`java${version}`);
-    if (os.platform() === "win32") {
-      javaPaths.push(`java${version}.exe`);
-    }
+  // Priority 3: Try java in PATH
+  addJavaIfValid("java", "PATH");
+  
+  // Priority 4: Try versioned java commands in PATH
+  for (let v = 25; v >= 8; v--) {
+    const javaCmd = os.platform() === "win32" ? `java${v}.exe` : `java${v}`;
+    addJavaIfValid(javaCmd, `PATH (Java ${v})`);
   }
   
-  // Test each path
-  for (const javaPath of javaPaths) {
-    const version = getJavaVersion(javaPath);
-    if (version !== null) {
-      return { path: javaPath, version };
-    }
-  }
-  
-  return null;
+  // Remove duplicates based on path (already done with seenPaths)
+  // Sort by version (highest first)
+  return javaInstallations.sort((a, b) => b.version - a.version);
 }
 
 function getRequiredJavaVersion(versionData) {
-  // Check javaVersion field in version data
+  // Check javaVersion field in version data (most reliable)
   if (versionData.javaVersion) {
     if (typeof versionData.javaVersion === "object") {
       return versionData.javaVersion.majorVersion || 21;
@@ -370,29 +606,76 @@ function getRequiredJavaVersion(versionData) {
     return versionData.javaVersion;
   }
   
-  // Default to Java 21 for modern versions (1.20.5+)
-  // Older versions might need Java 17 or 8
+  // Fallback: Parse version string
   const versionId = versionData.id || "";
-  const majorVersion = parseInt(versionId.split(".")[1] || "0", 10);
   
-  if (majorVersion >= 20) {
-    return 21; // 1.20.5+ requires Java 21
-  } else if (majorVersion >= 17) {
-    return 17; // 1.17+ requires Java 17
+  // Handle snapshot versions (e.g., "24w10a")
+  if (versionId.includes("w")) {
+    const yearMatch = versionId.match(/^(\d{2})w/);
+    if (yearMatch) {
+      const year = parseInt(yearMatch[1], 10);
+      if (year >= 24) return 21; // 2024+ snapshots need Java 21
+      if (year >= 21) return 17; // 2021+ snapshots need Java 17
+    }
+    return 21; // Default for snapshots
   }
-  return 8; // Older versions
+  
+  // Handle release versions (e.g., "1.20.4")
+  const versionMatch = versionId.match(/^1\.(\d+)/);
+  if (versionMatch) {
+    const minorVersion = parseInt(versionMatch[1], 10);
+    
+    if (minorVersion >= 20) {
+      // 1.20.5+ requires Java 21
+      const patchMatch = versionId.match(/^1\.20\.(\d+)/);
+      if (patchMatch && parseInt(patchMatch[1], 10) >= 5) {
+        return 21;
+      }
+      return 17; // 1.20.0-1.20.4 uses Java 17
+    } else if (minorVersion >= 18) {
+      return 17; // 1.18+ requires Java 17
+    } else if (minorVersion >= 17) {
+      return 16; // 1.17 requires Java 16
+    } else if (minorVersion >= 12) {
+      return 8; // 1.12-1.16 uses Java 8
+    }
+  }
+  
+  return 8; // Very old versions
+}
+
+function selectBestJavaForVersion(requiredVersion, availableJava) {
+  if (availableJava.length === 0) {
+    return null;
+  }
+  
+  // Find exact match first
+  const exactMatch = availableJava.find(j => j.version === requiredVersion);
+  if (exactMatch) {
+    return exactMatch;
+  }
+  
+  // Find the closest version that's >= required
+  const compatibleJava = availableJava.filter(j => j.version >= requiredVersion);
+  if (compatibleJava.length > 0) {
+    // Return the one closest to required (smallest version that's still compatible)
+    return compatibleJava.reduce((closest, current) => 
+      current.version < closest.version ? current : closest
+    );
+  }
+  
+  // No compatible version found
+  return null;
 }
 
 function buildClassPath(version, versionData) {
   const classPath = [];
   
-  // Add client JAR
   const versionJar = path.join(VERSIONS_DIR, version, `${version}.jar`);
   if (fs.existsSync(versionJar)) {
     classPath.push(versionJar);
   }
   
-  // Add libraries
   if (versionData.libraries) {
     for (const library of versionData.libraries) {
       if (shouldUseLibrary(library) && library.downloads && library.downloads.artifact) {
@@ -409,7 +692,7 @@ function buildClassPath(version, versionData) {
 }
 
 function launchMinecraft(versionId, username, ramAllocation, onProgress) {
-  // Handle backward compatibility: if first arg is a function, it's the old signature
+  // Handle backward compatibility
   if (typeof versionId === "function") {
     onProgress = versionId;
     versionId = null;
@@ -452,7 +735,7 @@ function launchMinecraft(versionId, username, ramAllocation, onProgress) {
           versionData.downloads.client.url,
           clientJar,
           (progress) => {
-            if (onProgress) onProgress(5 + progress * 0.3); // 5-35%
+            if (onProgress) onProgress(5 + progress * 0.3);
           }
         );
       }
@@ -460,43 +743,51 @@ function launchMinecraft(versionId, username, ramAllocation, onProgress) {
       
       // Download libraries
       await downloadLibraries(versionData, (progress) => {
-        if (onProgress) onProgress(35 + progress * 0.5); // 35-85%
+        if (onProgress) onProgress(35 + progress * 0.5);
       });
       if (onProgress) onProgress(85);
       
-      // Download assets (all required assets)
-      try {
-        await downloadAssets(versionData, onProgress);
-      } catch (error) {
-        console.warn(`Asset download had issues: ${error.message}`);
-        // Continue anyway - some assets might be downloaded
-      }
+      // Download assets
+      await downloadAssets(versionData, onProgress);
       if (onProgress) onProgress(100);
       
-      // Check Java version requirements
+      // Extract native libraries
+      const nativesDir = path.join(MINECRAFT_DIR, "natives");
+      extractNatives(versionData, nativesDir);
+      
+      // Determine required Java version
       const requiredJavaVersion = getRequiredJavaVersion(versionData);
-      const javaInfo = findJavaExecutable();
+      console.log(`Minecraft ${version} requires Java ${requiredJavaVersion}`);
       
-      if (!javaInfo) {
+      // Find all available Java installations
+      const availableJava = findAllJavaInstallations();
+      
+      if (availableJava.length === 0) {
         reject(new Error(
-          `Java not found. Please install Java ${requiredJavaVersion} or later and ensure it's in your PATH.\n` +
-          `You can download it from: https://adoptium.net/`
+          `No Java installation found. Please install Java ${requiredJavaVersion} or later.\n` +
+          `You can download it from: https://adoptium.net/,https://www.java.com/tr/ or https://www.azul.com/downloads/?package=jdk#zulu`
         ));
         return;
       }
       
-      if (javaInfo.version < requiredJavaVersion) {
+      console.log(`Found ${availableJava.length} Java installation(s):`);
+      availableJava.forEach(j => console.log(`  - Java ${j.version} (${j.vendor}) at ${j.path}`));
+      
+      // Select best Java for this version
+      const selectedJava = selectBestJavaForVersion(requiredJavaVersion, availableJava);
+      
+      if (!selectedJava) {
+        const availableVersions = availableJava.map(j => j.version).join(", ");
         reject(new Error(
-          `Java version ${javaInfo.version} is too old. Minecraft ${version} requires Java ${requiredJavaVersion} or later.\n` +
-          `Current Java: ${javaInfo.version}\n` +
-          `Required Java: ${requiredJavaVersion}\n` +
-          `Please install Java ${requiredJavaVersion} from: https://adoptium.net/\n` +
-          `Or set JAVA_HOME to point to Java ${requiredJavaVersion} installation.`
+          `No compatible Java found for Minecraft ${version}.\n` +
+          `Required: Java ${requiredJavaVersion} or later\n` +
+          `Available: Java ${availableVersions}\n` +
+          `Please install Java ${requiredJavaVersion} from: https://adoptium.net/`
         ));
         return;
       }
       
-      console.log(`Using Java ${javaInfo.version} at: ${javaInfo.path}`);
+      console.log(`Selected Java ${selectedJava.version} (${selectedJava.vendor}) at: ${selectedJava.path}`);
       
       // Build classpath
       const classPath = buildClassPath(version, versionData);
@@ -506,21 +797,28 @@ function launchMinecraft(versionId, username, ramAllocation, onProgress) {
       
       // Build JVM arguments
       const jvmArgs = [
-        `-Djava.library.path=${path.join(MINECRAFT_DIR, "natives")}`,
-        `-cp`, classPath,
+        `-Xmx${ramAllocation}M`,
+        `-Xms${Math.floor(ramAllocation / 2)}M`,
+        `-Djava.library.path=${nativesDir}`,
+        "-cp", classPath,
         mainClass,
+      
         "--version", version,
         "--gameDir", MINECRAFT_DIR,
         "--assetsDir", ASSETS_DIR,
         "--assetIndex", versionData.assetIndex?.id || "",
         "--username", username,
+        "--userProperties", "{}",   // ✅ REQUIRED FOR OLD VERSIONS
         "--accessToken", "0",
         "--userType", "legacy",
         "--versionType", "release"
       ];
       
+      
+      console.log(`Launching Minecraft ${version} with Java ${selectedJava.version}...`);
+      
       // Launch Minecraft
-      const child = spawn(javaInfo.path, jvmArgs, {
+      const child = spawn(selectedJava.path, jvmArgs, {
         stdio: "inherit",
         cwd: MINECRAFT_DIR
       });
@@ -542,6 +840,5 @@ function launchMinecraft(versionId, username, ramAllocation, onProgress) {
     }
   });
 }
-
 
 module.exports = { launchMinecraft, getVersions };
