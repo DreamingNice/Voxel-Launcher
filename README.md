@@ -12,9 +12,9 @@ Launcher curently supports all Java platforms but you need to install Java 8-17-
 
 ## Installation
 
-You can download from rleases and install it using the installer.
+You can download from releases and install it using the installer.
 
-The launcher currently supports **Windows and Linux** Mac OS support will come soon. 
+The launcher currently supports **Windows and Linux**. Mac OS support will come soon. 
 
 ---
 
