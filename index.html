@@ -38,6 +38,18 @@
         z-index: -1;
         display: block;
       }
+      
+      .settings-button {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  /* existing styles */
+}
+
+#accountManagerBtn {
+  right: 80px;   /* Moves it left of the settings button */
+  /* You can adjust this value depending on spacing you want */
+}
 
       .container {
         background: rgba(255, 255, 255, 0.95);
@@ -123,6 +135,8 @@
       input::placeholder {
         color: #999;
       }
+
+      
 
       .launch-button {
         width: 100%;
@@ -536,8 +550,16 @@
     </style>
   </head>
   <body>
+
+  
+  
+
     <canvas class="background-canvas"></canvas>
+    <button class="settings-button" id="accountManagerBtn" title="Account Manager">👤</button>
+    
     <button class="settings-button" id="settingsButton" title="Settings">⚙️</button>
+    <!-- Place this right after the settings button -->
+    
     <div class="container">
       <h1>Voxel Launcher</h1>
       
@@ -571,6 +593,82 @@
       </div>
     </div>
 
+<!-- Account Manager Modal -->
+<div class="settings-modal" id="accountManagerModal">
+  <div class="settings-content">
+    <div class="settings-header">
+      <h2>Account Manager</h2>
+      <button class="close-button" id="closeAccountModal">&times;</button>
+    </div>
+
+    <div class="settings-section">
+      <h3>Microsoft Account</h3>
+      <button id="msLoginBtn" class="account-action-button ms-login-button">Login with Microsoft</button>
+      <p id="msLoginStatus" style="margin-top: 10px; min-height: 20px; font-size: 12px; color: #666;"></p>
+    </div>
+
+    <div class="settings-section">
+      <h3>Offline Account</h3>
+      <input type="text" id="offlineUsername" placeholder="Enter username" style="margin-bottom: 10px;">
+      <button id="addOfflineBtn" class="account-action-button add-offline-button">Add Offline Account</button>
+    </div>
+
+    <div class="settings-section">
+      <h3>Your Accounts</h3>
+      <div id="accountList" style="max-height: 300px; overflow-y: auto;"></div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .account-action-button {
+    width: 100%;
+    padding: 12px 16px;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+  }
+
+  .ms-login-button {
+    background: linear-gradient(135deg, #2d89ef 0%, #1e5eb8 100%);
+    margin-bottom: 10px;
+  }
+
+  .ms-login-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(45, 137, 239, 0.5);
+  }
+
+  .ms-login-button:active {
+    transform: translateY(0);
+  }
+
+  .add-offline-button {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    margin-top: 10px;
+  }
+
+  .add-offline-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+  }
+
+  .add-offline-button:active {
+    transform: translateY(0);
+  }
+
+  /* Dark mode support */
+  body.theme-dark .account-action-button {
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+  }
+</style>
+
+
     <!-- Settings Modal -->
     <div class="settings-modal" id="settingsModal">
       <div class="settings-content">
@@ -578,7 +676,7 @@
           <h2>Settings</h2>
           <button class="close-button" id="closeSettings">×</button>
         </div>
-
+    
         <div class="settings-section">
           <h3>Theme</h3>
           <div class="theme-options">
@@ -623,13 +721,37 @@
             </label>
           </div>
         </div>
-
+        
         <div class="settings-section">
           <h3>Game Directories</h3>
           <p style="color: #666; margin-bottom: 15px;">Open game directories in file explorer</p>
           <button class="directory-button" id="openGameDir">
             📁 Open Game Directory
           </button>
+
+          <hr style="margin: 15px 0;">
+
+          <h3>Account</h3>
+          
+          <button id="msLoginBtn" style="
+            padding: 10px 16px;
+            border-radius: 8px;
+            border: none;
+            background: #2d89ef;
+            color: white;
+            font-weight: 600;
+            cursor: pointer;
+          ">
+            Login with Microsoft
+          </button>
+          
+          <div id="loginStatus" style="
+            margin-top: 6px;
+            font-size: 12px;
+            color: #aaa;
+          "></div>
+          
+
         </div>
       </div>
     </div>
@@ -1170,5 +1292,423 @@
         animate();
       });
     </script>
+
+<script>
+  const msBtn = document.getElementById("msLoginBtn");
+  const loginStatus = document.getElementById("loginStatus");
+
+  if (msBtn) {
+    msBtn.addEventListener("click", async () => {
+      loginStatus.textContent = "Opening Microsoft login…";
+
+      try {
+        const result = await window.electronAPI.msLogin();  // Changed from window.api.microsoftLogin()
+        if (result.success && result.account) {
+          loginStatus.textContent = `Logged in as ${result.account.username}`;
+        } else {
+          loginStatus.textContent = "Login cancelled or failed";
+        }
+      } catch (err) {
+        console.error(err);
+        loginStatus.textContent = `Login failed: ${err.message}`;
+      }
+    });
+  }
+</script>
+
+<script>
+  // === Account Manager Modal Controls ===
+  const accountManagerBtn = document.getElementById("accountManagerBtn");
+  const accountManagerModal = document.getElementById("accountManagerModal");
+  const closeAccountModal = document.getElementById("closeAccountModal");
+
+  if (accountManagerBtn) {
+    accountManagerBtn.addEventListener("click", () => {
+      accountManagerModal.classList.add("active");
+      loadAccounts(); // Load accounts when opening
+//ol text fix
+accountManagerBtn.addEventListener("click", () => {
+  accountManagerModal.classList.add("active");
+  loadAccounts();
+  
+  // ← paste the 8 lines here
+  const offlineBox = document.getElementById("offlineUsername");
+  if (offlineBox) {
+    offlineBox.readOnly = false;
+    offlineBox.disabled = false;
+    offlineBox.style.pointerEvents = "auto";
+    offlineBox.style.opacity = "1";
+    offlineBox.style.cursor = "text";
+    offlineBox.focus();
+  }
+});
+
+
+    });
+  }
+
+  if (closeAccountModal) {
+    closeAccountModal.addEventListener("click", () => {
+      accountManagerModal.classList.remove("active");
+    });
+  }
+
+  // Close when clicking outside the content
+  accountManagerModal.addEventListener("click", (e) => {
+    if (e.target === accountManagerModal) {
+      accountManagerModal.classList.remove("active");
+    }
+  });
+
+  // === Account Manager Logic ===
+  async function loadAccounts() {
+  try {
+    const { accounts, selectedAccount } = await window.electronAPI.getAccounts();
+    const accountList = document.getElementById("accountList");
+    if (!accountList) return;
+
+    accountList.innerHTML = '';
+
+    if (accounts.length === 0) {
+      accountList.innerHTML = '<p style="color:#999; text-align:center;">No accounts added yet</p>';
+      
+      // CRITICAL: Ensure offline input stays writable even with no accounts
+      const offlineInput = document.getElementById("offlineUsername");
+      if (offlineInput) {
+        offlineInput.readOnly = false;
+        offlineInput.disabled = false;
+      }
+      return;
+
+      
+    }
+
+    accounts.forEach(acc => {
+      const isSelected = (acc.type === 'microsoft' ? acc.uuid : acc.username) === selectedAccount;
+      const identifier = acc.type === 'microsoft' ? acc.uuid : acc.username;
+
+      const item = document.createElement('div');
+      item.style.cssText = `
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px;
+        margin: 8px 0;
+        background: ${isSelected ? '#667eea15' : '#f5f5f5'};
+        border: 2px solid ${isSelected ? '#667eea' : 'transparent'};
+        border-radius: 8px;
+        transition: all 0.3s ease;
+      `;
+
+      item.innerHTML = `
+        <div>
+          <strong>${acc.username}</strong>
+          <small style="color:#777; display:block; font-size:12px;"> ${acc.type} ${isSelected ? '✓ Selected' : ''}</small>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          ${acc.type === 'microsoft' && acc.refreshToken ? `<button class="refresh" data-refresh="${acc.uuid}" style="padding: 6px 12px; background: #f0f0f0; border: 1px solid #ddd; border-radius: 5px; cursor: pointer; font-size: 12px;">Refresh</button>` : ''}
+          <button class="select" data-id="${identifier}" style="padding: 6px 12px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 12px;">Select</button>
+          <button class="remove" data-id="${identifier}" style="padding: 6px 12px; background: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 12px;">Remove</button>
+        </div>
+      `;
+      accountList.appendChild(item);
+
+    });
+
+    // Attach event listeners
+    accountList.querySelectorAll('.select').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await selectAccount(btn.dataset.id);
+        updateUsernameDisplay();
+        // CRITICAL: Re-unlock offline input after selection
+        const offlineInput = document.getElementById("offlineUsername");
+        if (offlineInput) {
+          offlineInput.readOnly = false;
+          offlineInput.disabled = false;
+        }
+      });
+    });
+
+    accountList.querySelectorAll('.remove').forEach(btn => {
+      btn.addEventListener('click', () => removeAccount(btn.dataset.id));
+    });
+
+    accountList.querySelectorAll('.refresh').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const uuid = btn.dataset.refresh;
+        if (uuid) refreshAccount(uuid);
+      });
+    });
+
+    // CRITICAL: Re-unlock offline input after loading accounts
+    const offlineInput = document.getElementById("offlineUsername");
+    if (offlineInput) {
+      offlineInput.readOnly = false;
+      offlineInput.disabled = false;
+    }
+  } catch (err) {
+    console.error("Failed to load accounts:", err);
+    setTimeout(() => {
+      const offline = document.getElementById("offlineUsername");
+      if (offline) {
+        offline.readOnly = false;
+        offline.disabled = false;
+        offline.style.pointerEvents = "auto";
+        offline.style.opacity = "1";
+        offline.style.cursor = "text";
+      }
+    }, 100);
+  }
+}
+      
+  
+
+
+
+  // ===== INDEX.HTML JAVASCRIPT FIXES =====
+
+// Update the loadAccounts function
+async function loadAccounts() {
+  try {
+    const { accounts, selectedAccount } = await window.electronAPI.getAccounts();
+    const accountList = document.getElementById("accountList");
+    if (!accountList) return;
+
+    accountList.innerHTML = '';
+
+    if (accounts.length === 0) {
+      accountList.innerHTML = '<p style="color:#999; text-align:center;">No accounts added yet</p>';
+      return;
+    }
+
+    accounts.forEach(acc => {
+      const isSelected = (acc.type === 'microsoft' ? acc.uuid : acc.username) === selectedAccount;
+      const identifier = acc.type === 'microsoft' ? acc.uuid : acc.username;
+
+      const item = document.createElement('div');
+      item.style.cssText = `
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px;
+        margin: 8px 0;
+        background: ${isSelected ? '#667eea15' : '#f5f5f5'};
+        border: 2px solid ${isSelected ? '#667eea' : 'transparent'};
+        border-radius: 8px;
+        transition: all 0.3s ease;
+      `;
+
+      item.innerHTML = `
+        <div>
+          <strong>${acc.username}</strong>
+          <small style="color:#777; display:block; font-size:12px;"> ${acc.type} ${isSelected ? '✓ Selected' : ''}</small>
+        </div>
+        <div style="display: flex; gap: 8px;">
+          ${acc.type === 'microsoft' && acc.refreshToken ? `<button class="refresh" data-refresh="${acc.uuid}" style="padding: 6px 12px; background: #f0f0f0; border: 1px solid #ddd; border-radius: 5px; cursor: pointer; font-size: 12px;">Refresh</button>` : ''}
+          <button class="select" data-id="${identifier}" style="padding: 6px 12px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 12px;">Select</button>
+          <button class="remove" data-id="${identifier}" style="padding: 6px 12px; background: #e74c3c; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 12px;">Remove</button>
+        </div>
+      `;
+      accountList.appendChild(item);
+    });
+
+    // Attach event listeners
+    accountList.querySelectorAll('.select').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        await selectAccount(btn.dataset.id);
+        updateUsernameDisplay();
+      });
+    });
+
+    accountList.querySelectorAll('.remove').forEach(btn => {
+      btn.addEventListener('click', () => removeAccount(btn.dataset.id));
+    });
+
+    accountList.querySelectorAll('.refresh').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const uuid = btn.dataset.refresh;
+        if (uuid) refreshAccount(uuid);
+      });
+    });
+  } catch (err) {
+    console.error("Failed to load accounts:", err);
+  }
+}
+
+// New function to update username display
+// Replace updateUsernameDisplay with this - NO readOnly:
+
+async function updateUsernameDisplay() {
+  try {
+    const result = await window.electronAPI.getSelectedAccount();
+    if (result.success && result.account) {
+      const mainUsernameInput = document.getElementById("username");
+      if (mainUsernameInput) {
+        mainUsernameInput.value = result.account.username;
+        // ONLY update the value - no styling, no readOnly
+      }
+    }
+  } catch (err) {
+    console.error("Failed to update username display:", err);
+  }
+}
+
+async function selectAccount(identifier) {
+  try {
+    const result = await window.electronAPI.selectAccount(identifier);
+    if (result.success) {
+      // Update username immediately in the main screen
+      const usernameInput = document.getElementById("username");
+      if (usernameInput) {
+        usernameInput.value = result.account.username;
+      }
+      
+      loadAccounts();
+      updateUsernameDisplay()
+      // Show success feedback
+      const status = document.getElementById("loginStatus");
+      if (status) {
+        status.textContent = `Selected: ${result.account.username}`;
+        setTimeout(() => { status.textContent = ''; }, 3000);
+      }
+    } else {
+      alert("Failed to select account: " + result.error);
+    }
+  } catch (err) {
+    console.error("Select account error:", err);
+    alert("Failed to select account");
+  }
+}
+
+async function removeAccount(identifier) {
+  if (!confirm("Remove this account?")) return;
+  try {
+    const result = await window.electronAPI.removeAccount(identifier);
+    if (result.success) {
+      loadAccounts();
+//force unloc func.
+async function removeAccount(identifier) {
+  if (!confirm("Remove this account?")) return;
+  try {
+    const result = await window.electronAPI.removeAccount(identifier);
+    if (result.success) {
+      loadAccounts();
+      
+      // ─── IMPORTANT: Force unlock ALL text boxes after delete ───
+      setTimeout(() => {
+        // Unlock offline username box
+        const offline = document.getElementById("offlineUsername");
+        if (offline) {
+          offline.readOnly = false;
+          offline.disabled = false;
+          offline.style.pointerEvents = "auto";
+          offline.style.opacity = "1";
+          offline.style.cursor = "text";
+        }
+
+        // Unlock main username box (if you have one)
+        const mainUser = document.getElementById("username");
+        if (mainUser) {
+          mainUser.readOnly = false;
+          mainUser.disabled = false;
+          mainUser.style.pointerEvents = "auto";
+          mainUser.style.opacity = "1";
+          mainUser.style.cursor = "text";
+        }
+      }, 100);  // small delay so it runs after list refresh
+    } else {
+      alert("Failed to remove account: " + result.error);
+    }
+  } catch (err) {
+    alert("Failed to remove account");
+  }
+}
+
+
+      updateUsernameDisplay();
+    } else {
+      alert("Failed to remove account: " + result.error);
+    }
+  } catch (err) {
+    alert("Failed to remove account");
+  }
+}
+
+async function refreshAccount(uuid) {
+  try {
+    const result = await window.electronAPI.refreshAccount(uuid);
+    if (result.success) {
+      loadAccounts();
+      alert("Account refreshed successfully!");
+    } else {
+      alert("Refresh failed: " + (result.error || "Unknown error"));
+    }
+  } catch (err) {
+    alert("Refresh failed: " + err.message);
+  }
+}
+
+// Update the Add Offline Account button
+document.getElementById("addOfflineBtn")?.addEventListener("click", async () => {
+  const usernameInput = document.getElementById("offlineUsername");
+  const username = usernameInput?.value.trim();
+
+  if (!username || username.length < 3) {
+    alert("Please enter a valid username (3+ characters)");
+    return;
+  }
+
+  if (username.length > 16) {
+    alert("Username must be 16 characters or less");
+    return;
+  }
+
+  try {
+    const result = await window.electronAPI.addOfflineAccount(username);
+    if (result.success) {
+      usernameInput.value = "";
+      loadAccounts();
+      updateUsernameDisplay();
+      const status = document.getElementById("loginStatus");
+      if (status) {
+        status.textContent = "Offline account added!";
+        setTimeout(() => { status.textContent = ''; }, 3000);
+      }
+    } else {
+      alert("Failed: " + (result.error || "Unknown error"));
+    }
+  } catch (err) {
+    alert("Failed to add account: " + err.message);
+  }
+});
+
+// Update Microsoft Login button
+document.getElementById("msLoginBtn")?.addEventListener("click", async () => {
+  const status = document.getElementById("loginStatus");
+  if (status) status.textContent = "Opening Microsoft login...";
+
+  try {
+    const result = await window.electronAPI.msLogin();
+    if (result.success && result.account) {
+      if (status) {
+        status.textContent = `Logged in as ${result.account.username}`;
+        setTimeout(() => { status.textContent = ''; }, 3000);
+      }
+      loadAccounts();
+      updateUsernameDisplay();
+    } else {
+      if (status) status.textContent = "Login cancelled";
+    }
+  } catch (err) {
+    if (status) status.textContent = `Error: ${err.message || "Login failed"}`;
+    console.error(err);
+  }
+}); 
+ 
+
+</script>
+
+
   </body>
 </html>
+
