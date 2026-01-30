@@ -115,4 +115,6 @@ This project is licensed under the **MIT License**.
 
 ⚠ Not affiliated with **Mojang** or **Microsoft**!
 
+🔹Also if you know how to code a launcher you can help us to devlop!
+
 🎮 Happy Crafting with Voxel Launcher!
