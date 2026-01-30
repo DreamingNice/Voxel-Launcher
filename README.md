@@ -14,7 +14,7 @@ That is normal for unsigned (unlicensed) applications.
 
 ## ☕ JAVA
 
-The launcher currently supports Java platforms, but you need to install one of the following versions:
+The launcher currently supports Java platforms, but you need to install following versions:
 
 - Java 8  
 - Java 17  
@@ -87,7 +87,7 @@ npm start
 
 ---
 
-# 🏗 BUILD LINUX BINARIES
+# 🏗 BUILD LINUX     BINARIES
 ```bash
 npm run build
 ```
