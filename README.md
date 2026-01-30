@@ -26,7 +26,7 @@ The launcher currently supports all Java platforms, but you need to install foll
 
 ## 📦 Installation
 
-You can download the launcher from the **Releases** page and install it using the installer(for Windows currently).
+You can download the launcher from the **Releases** page and install it using the installer (**for Windows currently**).
 
 The launcher currently supports **Windows and Linux**.  
 Mac OS support will come soon ..
