@@ -20,7 +20,7 @@ The launcher currently supports all Java platforms, but you need to install foll
 - Java 17  
 - Java 21
 
-• Built-in java will be add..
+• Built-in java will be added..
 
 ---
 
