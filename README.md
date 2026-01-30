@@ -20,7 +20,7 @@ The launcher currently supports all Java platforms, but you need to install foll
 - Java 17  
 - Java 21
 
-• Built-in java will be added..
+• Built-in java is avable for **Windows Devices** but for now linux needed legacy installation (for sadly..)
 
 ---
 
