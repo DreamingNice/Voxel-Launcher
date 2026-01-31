@@ -1,0 +1,1 @@
+Sadly the java file size is vary big for github so u need to install it forself if u are cloning (i recomend zulu) pack like this: java=>linux=>java 8,17,21. Put the file into the voxel launcher folder and ur done.
