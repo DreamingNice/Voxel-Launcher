@@ -1,5 +1,5 @@
 
-<img width="800" height="225" alt="Adsız tasarım (4)" src="https://github.com/user-attachments/assets/764ade90-a4ba-4b47-a1d8-3cb13bc7767f" />
+<img width="800" height="225" alt="Launcher Logo" src="https://github.com/user-attachments/assets/764ade90-a4ba-4b47-a1d8-3cb13bc7767f" />
 
 
 # Voxel Launcher
@@ -13,6 +13,7 @@ The project is still in development, so there may be some bugs.
 
 When you open the launcher, SmartScreen may block the launcher.  
 That is normal for unsigned (unlicensed) applications.
+To run the laucnher, first click "More info" then "Run anyway".
 
 ---
 
@@ -26,6 +27,7 @@ The launcher currently supports all Java platforms, but you need to install foll
 
 • Built-in Java is available for **Linux and Windows devices**.  
 • On **macOS**, Java must be installed manually (legacy installation for now).
+We recommend downloading a build from [Azul](https://www.azul.com/downloads/?package=jdk-fx#downloads-table-zulu)
 
 ---
 
@@ -33,7 +35,7 @@ The launcher currently supports all Java platforms, but you need to install foll
 
 You can download the launcher from the **Releases** page and install it using the installer (**for Windows and Linux currently**).
 
-The launcher currently supports **Windows, Linux, and macOS (from source)**.  
+The launcher currently supports **Windows, Linux, and macOS (requires building from source)**.  
 Linux and macOS binary installers are planned for future releases.
 
 ---
@@ -118,7 +120,7 @@ dist/
 ## 🐧 Linux Support
 
 Linux is fully supported it has support all futures of the launcher. 
-**if you encounter an issue please report us!!**
+**if you encounter an issue please report to us!!**
 
 ---
 
@@ -131,7 +133,7 @@ If you are cloning the project, you need to install npm in the root of the proje
 
 ## 📜 License
 
-This project is licensed under the **MIT License**.
+This project is licensed under the **GNU GPL V3.0 License**.
 
 ---
 
@@ -139,7 +141,7 @@ This project is licensed under the **MIT License**.
 
 ---
 
-🔹Also if you know how to code a launcher you can help us to devlop!
+🔹Also if you know how to code a launcher you can help us with devlopment!
 
 ---
 
